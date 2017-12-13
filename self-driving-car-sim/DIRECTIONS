@@ -1,0 +1,25 @@
+DIRECTIONS
+
+car-behavioral-cloning
+	Install Anaconda (for creating the TensorFlow environment), make sure to add to PATH variable
+	conda env create -f environment.yml (In the car-behavioral-cloning Git Directory)
+	source activate car-behavioral-cloning (In the car-behavioral-cloning Git Directory)
+	(WHEN UNITY IS OPEN WITH AUTONOMOUS MODE RUNNING) python drive.py model.h5  (In the car-behavioral-cloning Git Directory)
+	
+	For modifications, the image being overlayed is in /.../self-driving-car-sim/Assets/1_SelfDrivingCar/Sprites/adversarial.png
+
+	Add header to trianing data log "center,left,right,steering,throttle,br,speed"
+
+self-driving-car-sim
+	Start up in Unity
+	Play button
+	Tick the Adversarial Checkbox
+	Autonomous Mode
+	The text file containing the angle and stuff is in /.../self-driving-car-sim/Assets/1_SelfDrivingCar/Text/carsteer.txt
+	Format is: oldSteeringAngle + " " + oldAcceleration + " " + stAng + " " + acc + " " + Time.frameCount
+	old_____ = Image Overlayed
+	stAng & acc = Image NOT Overlayedf
+
+	Control the debug print and the max frame rate from:
+	self-driving-car-sim/Assets/1_SelfDrivingCar/Scripts/CommandServer.cs
+
