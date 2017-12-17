@@ -69,6 +69,10 @@ def turn_left(addition):
         # Identify the change in turning angle provided by the image
         turn = float(model.predict(np.array([transformed_addition]), batch_size=1))
         all_delta.append(turn)
+        img = Image.fromarray(np.asarray(transformed_addition.reshape(IMAGE_SHAPE), dtype=np.uint8))
+        img_name = "left_adv_imgs/left_adversarial_%i(%.2f).png"%(transform, turn)
+        img.save(img_name)
+
         # # Cycle all images
         # random.shuffle(images_and_steering)
         # for (original, sa) in images_and_steering[:NUM_IMAGES]:
@@ -82,6 +86,7 @@ def turn_left(addition):
         #     turn = float(model.predict(np.array([img]), batch_size=1))
         #     delta = turn - sa
         #     all_delta.append(delta)
+    exit()
     print()
     print(all_delta)
     # Return the average delta achieved by all transformations on all images
@@ -96,18 +101,18 @@ def turn_left(addition):
 #      Adversarial Image Analysis     
 # ====================================
 
-with open("opt_output.pkl", "rb") as f:
+with open("left_random_solution_1.pkl", "rb") as f:
     output = pickle.load(f)
 
 from util.plotly import Plot
 p = Plot()
 p.add_histogram("Adversarial Image", output)
-p.plot(show=False)
+p.plot(file_name="left_random_solution_1.html", show=False)
 
 print("Turn prouduced:", turn_left(output))
 img = Image.fromarray(np.asarray(output.reshape(ADVERSARIAL_IMAGE_SIZE),
                                  dtype=np.uint8))
-img.save("1-adversarial.png")
+# img.save("left_random_solution_1.png")
 
 exit()
 
@@ -127,5 +132,5 @@ output = minimize(turn_left, initial_solution, bounds=bounds,
                   method=AdaptiveNormal, display=True)
 
 print(output)
-with open("opt_output.pkl", "wb") as f:
+with open("left_random_solution_1.pkl", "wb") as f:
     pickle.dump(output, f)
