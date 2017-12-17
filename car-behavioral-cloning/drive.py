@@ -26,9 +26,9 @@ MIN_SPEED = 10
 
 speed_limit = MAX_SPEED
 
-# List of images and steering angles for generating adversarial inputs
-image_and_steering = []
-num_pictures = 1000
+# # List of images and steering angles for generating adversarial inputs
+# image_and_steering = []
+# num_pictures = 1700
 
 @sio.on('telemetry')
 def telemetry(sid, data):
@@ -49,13 +49,13 @@ def telemetry(sid, data):
             # predict the steering angle for the image
             steering_angle = float(model.predict(image, batch_size=1))
 
-            # Store the image and steering angle
-            image_and_steering.append( (image.copy(), steering_angle) )
-            if len(image_and_steering) > 1000:
-                import pickle
-                with open("images_and_steering_angles.pkl", "wb") as f:
-                    pickle.dump(image_and_steering)
-                exit()
+            # # Store the image and steering angle
+            # image_and_steering.append( (image.copy(), steering_angle) )
+            # if len(image_and_steering) > num_pictures:
+            #     import pickle
+            #     with open("images_and_steering_angles.pkl", "wb") as f:
+            #         pickle.dump(image_and_steering, f)
+            #     exit()
 
             # lower the throttle as the speed increases
             # if the speed is above the current speed limit, we are on a downhill.
