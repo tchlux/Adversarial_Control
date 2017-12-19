@@ -1,3 +1,6 @@
+# Emacs
+.tramp_history
+
 # mac
 .DS_Store
 *.app/
