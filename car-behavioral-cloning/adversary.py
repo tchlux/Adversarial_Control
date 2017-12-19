@@ -1,8 +1,13 @@
-import pickle
+import pickle, sys, random
 import numpy as np
 from PIL import Image
 from image import random_transformation
-from keras.models import load_model
+stdout, stderr = sys.stdout, sys.stderr
+with open("/dev/null","w") as f:
+    sys.stdout = sys.stderr = f
+    from keras.models import load_model
+    sys.stdout = stdout
+    sys.stderr = stderr
 
 #      Load the images and correct steering angles     
 # =====================================================
@@ -26,18 +31,33 @@ PROGRESS_LEN = 50
 
 #      Program Control Flow     
 # ==============================
-SAVE_ALL_IMAGES = True
+SAVE_ALL_IMAGES = False
 NEUTRAL_IMAGE_TEST = False
 TRAIN_ON_REAL_IMAGES = False
 PLOT_DELTA_DISTRIBUTION = False
 ANALYZE_EXISTING_IMAGE = False
-GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES = True
+GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES = False
 GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES = not GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES
 TURN_NAME = "left"
 
-import random
 random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
+
+# ===================================================
+#      Conditional Imports Based on Control Flow     
+# ===================================================
+if PLOT_DELTA_DISTRIBUTION or ANALYZE_EXISTING_IMAGE:
+    from util.plotly import Plot
+if GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES:
+    from util.optimize import AMPGO, AdaptiveNormal, Random
+    from util.optimize import minimize
+    if TURN_NAME == "left":
+        from left_random_solution_1 import sol as initial_solution
+    else:
+        from right_random_solution_1 import sol as initial_solution
+if GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES:
+    from cleverhans.attacks import CarliniWagnerL2, FastGradientMethod
+
 
 print("Image shape:    ", IMAGE_SHAPE)
 print("Adversary shape:", ADVERSARIAL_IMAGE_SIZE)
@@ -116,7 +136,6 @@ def turn(addition, turn_name=TURN_NAME):
 
     if PLOT_DELTA_DISTRIBUTION:
         print(all_delta)
-        from util.plotly import Plot
         p = Plot("Randomly Transformed Adversarial {:s} Turn Image (100 bins)".format(turn_name.title()), 
                  "Normalized Turning Angle", "Probability")
         p.add_histogram("Turn Angles", all_delta)
@@ -138,7 +157,6 @@ if ANALYZE_EXISTING_IMAGE:
     with open("{}_random_solution_1.pkl".format(TURN_NAME), "rb") as f:
         output = pickle.load(f)
 
-    from util.plotly import Plot
     p = Plot()
     p.add_histogram("Adversarial Image", output)
     p.plot(file_name="{}_random_solution_1.html".format(TURN_NAME), show=False)
@@ -151,15 +169,7 @@ if ANALYZE_EXISTING_IMAGE:
 # ======================================
 #      Adversarial Image Generation     
 # ======================================
-
 if GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES:
-    from util.optimize import AMPGO, AdaptiveNormal, Random
-    from util.optimize import minimize
-    if TURN_NAME == "left":
-        from left_random_solution_1 import sol as initial_solution
-    else:
-        from right_random_solution_1 import sol as initial_solution
-
     sample_img = np.ones(ADVERSARIAL_IMAGE_SIZE, dtype=np.uint8).flatten()*NEUTRAL_VALUE
     print("Starting optimization.")
     bounds = [(0,255)]*np.prod(ADVERSARIAL_IMAGE_SIZE)
@@ -173,4 +183,184 @@ if GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES:
 
 
 if GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES:
-    pass
+
+    # (img, steer_ang) = IMAGES_AND_STEERING[0]
+    # img = np.array([img.reshape(IMAGE_SHAPE)])
+    # attack = CarliniWagnerL2.generate(MODEL, img)
+    # print()
+    # help(attack)
+    # print()
+    # print(attack)
+
+    # ================================
+    #      Cleverhans attack code     
+    # ================================
+
+    # from __future__ import absolute_import
+    # from __future__ import division
+    # from __future__ import print_function
+    # from __future__ import unicode_literals
+
+    import numpy as np
+    import keras
+    from keras import backend
+    from keras.optimizers import Adam
+    from keras.models import Sequential
+    from keras.layers import Lambda, Activation
+    import tensorflow as tf
+    from tensorflow.python.platform import flags
+
+    from cleverhans.utils_tf import model_train, model_eval
+    from cleverhans.attacks import FastGradientMethod
+    from cleverhans.utils import AccuracyReport
+    from cleverhans.utils_keras import cnn_model
+    from cleverhans.utils_keras import KerasModelWrapper
+
+    FLAGS = flags.FLAGS
+
+    # tf.app.run()
+    train_start=0
+    train_end=60000
+    test_start=0
+    test_end=10000
+    nb_epochs=6
+    batch_size=128
+    learning_rate=0.001
+    train_dir="/tmp"
+    filename="mnist.ckpt"
+    testing=False
+    # keras.layers.core.K.set_learning_phase(0)
+
+    # Object used to keep track of (and return) key accuracies
+    report = AccuracyReport()
+
+    # Set TF random seed to improve reproducibility
+    tf.set_random_seed(1234)
+
+    if not hasattr(backend, "tf"):
+        raise RuntimeError("This tutorial requires keras to be configured"
+                           " to use the TensorFlow backend.")
+
+    if keras.backend.image_dim_ordering() != 'tf':
+        keras.backend.set_image_dim_ordering('tf')
+        print("INFO: '~/.keras/keras.json' sets 'image_dim_ordering' to "
+              "'th', temporarily setting to 'tf'")
+
+    # Create TF session and set as Keras backend session
+    sess = tf.Session()
+    keras.backend.set_session(sess)
+
+    # Load the keras model for driving (in current session)
+    model_with_softmax = load_model("final_model.h5")
+
+    # Get the x values for identifying adversarial samples
+    x = np.array([img[0] for (img,sa) in IMAGES_AND_STEERING])
+
+    # Generate a model that adds a softmax output to the original model
+    def act_func(turn_angle):
+        # Use this activation function before the softmax (to
+        # 'classify' left and right turns). This will return larger
+        # numbers in index[0] for left turns.
+        mat = tf.constant([[-1.0, 1.0]])
+        result = tf.matmul(turn_angle, mat)
+        return result
+    model_with_softmax.add(Lambda(act_func, name="expand_to_classify"))
+    model_with_softmax.add(Activation("softmax"))
+    model_with_softmax.compile(loss='mean_squared_error', optimizer=Adam(lr=10**(-4)))
+    # Print out a summary of the model being used
+    # model_with_softmax.summary()
+
+    # Initialize the Fast Gradient Sign Method (FGSM) attack object and graph
+    wrap = KerasModelWrapper(MODEL)
+
+    # # ======================
+    # # ======================
+    # #      TESTING CODE     
+    # from cleverhans import utils_tf
+    # img,sa = IMAGES_AND_STEERING[0]
+    # print("IMAGE SHAPE", img.shape, flush=True)
+    # print(model_with_softmax.predict(img))
+    # print("-"*50)
+    # preds = np.array([model_with_softmax.predict(img) for (img,sa) in IMAGES_AND_STEERING])
+
+    # # Create TF session and set as Keras backend session
+
+    # # Using model predictions as ground truth to avoid label leaking
+    # preds_max = tf.reduce_max(preds, 1, keep_dims=True)
+    # y = tf.to_float(tf.equal(preds, preds_max))
+    # y = tf.stop_gradient(y)
+    # y = y / tf.reduce_sum(y, 1, keep_dims=True)
+
+    # # Compute loss
+    # loss = utils_tf.model_loss(y, preds, mean=False)
+    # if targeted:
+    #     loss = -loss
+
+    # # Define gradient of loss wrt input
+    # grad, = tf.gradients(loss, x)
+    # print(grad)
+
+    # exit()
+    # # ======================
+    # # ======================
+
+    fgsm = FastGradientMethod(wrap, sess=sess)
+    fgsm_params = {'eps': 0.3,
+                   'clip_min': 0.,
+                   'clip_max': 1.}
+    adv_x = fgsm.generate(x, **fgsm_params)
+    # Consider the attack to be constant
+    adv_x = tf.stop_gradient(adv_x)
+    preds_adv = model(adv_x)
+
+    # Evaluate the accuracy of the MNIST model on adversarial examples
+    eval_par = {'batch_size': batch_size}
+    acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
+    print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+    report.clean_train_adv_eval = acc
+
+    # Calculating train error
+    if testing:
+        eval_par = {'batch_size': batch_size}
+        acc = model_eval(sess, x, y, preds_adv, X_train,
+                         Y_train, args=eval_par)
+        report.train_clean_train_adv_eval = acc
+
+    print("Repeating the process, using adversarial training")
+    # Redefine TF model graph
+    model_2 = cnn_model()
+    preds_2 = model_2(x)
+    wrap_2 = KerasModelWrapper(model_2)
+    fgsm2 = FastGradientMethod(wrap_2, sess=sess)
+    preds_2_adv = model_2(fgsm2.generate(x, **fgsm_params))
+
+    def evaluate_2():
+        # Accuracy of adversarially trained model on legitimate test inputs
+        eval_params = {'batch_size': batch_size}
+        accuracy = model_eval(sess, x, y, preds_2, X_test, Y_test,
+                              args=eval_params)
+        print('Test accuracy on legitimate examples: %0.4f' % accuracy)
+        report.adv_train_clean_eval = accuracy
+
+        # Accuracy of the adversarially trained model on adversarial examples
+        accuracy = model_eval(sess, x, y, preds_2_adv, X_test,
+                              Y_test, args=eval_params)
+        print('Test accuracy on adversarial examples: %0.4f' % accuracy)
+        report.adv_train_adv_eval = accuracy
+
+    # Perform and evaluate adversarial training
+    model_train(sess, x, y, preds_2, X_train, Y_train,
+                predictions_adv=preds_2_adv, evaluate=evaluate_2,
+                args=train_params, save=False, rng=rng)
+
+    # Calculate training errors
+    if testing:
+        eval_params = {'batch_size': batch_size}
+        accuracy = model_eval(sess, x, y, preds_2, X_train, Y_train,
+                              args=eval_params)
+        report.train_adv_train_clean_eval = accuracy
+        accuracy = model_eval(sess, x, y, preds_2_adv, X_train,
+                              Y_train, args=eval_params)
+        report.train_adv_train_adv_eval = accuracy
+
+    print(report)

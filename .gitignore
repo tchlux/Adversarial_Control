@@ -3,3 +3,5 @@ cuda-repo-ubuntu1604-9-0-local_9.0.176-1_amd64.deb
 self-driving-car-sim.zip
 unity-editor_amd64-2017.2.0f3.deb
 anaconda3
+libcudnn6-dev_6.0.21-1+cuda8.0_amd64.deb
+cuda-repo-ubuntu1604-8-0-local-ga2_8.0.61-1_amd64.deb
