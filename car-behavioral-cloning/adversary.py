@@ -25,20 +25,22 @@ ADVERSARIAL_IMAGE_SIZE = tuple(np.array(IMAGE_SHAPE[:-1]) // 3)+(IMAGE_SHAPE[-1]
 ADVERSARIAL_IMAGE_SCALE = [-1,3]
 NEUTRAL_VALUE = 125
 NUM_TRANSFORMATIONS = 100
-NUM_IMAGES = 50
-MAX_COMPUTE_TIME_SEC = ((60*60)*24)
+NUM_IMAGES = 1
+MAX_COMPUTE_TIME_SEC = ((60*1)*60) # ((60*60)*24) # ((min*sec)*hours)
 PROGRESS_LEN = 50
 
 #      Program Control Flow     
 # ==============================
-SAVE_ALL_IMAGES = False
+SAVE_ALL_IMAGES = True
 NEUTRAL_IMAGE_TEST = False
 TRAIN_ON_REAL_IMAGES = False
 PLOT_DELTA_DISTRIBUTION = False
 ANALYZE_EXISTING_IMAGE = False
-GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES = False
+USE_RANDOM_TRANSFORMATIONS = True
+GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES = True
 GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES = not GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES
 TURN_NAME = "left"
+SOLUTION_NUMBER = "1"
 
 random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
@@ -52,9 +54,9 @@ if GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES:
     from util.optimize import AMPGO, AdaptiveNormal, Random
     from util.optimize import minimize
     if TURN_NAME == "left":
-        from left_random_solution_1 import sol as initial_solution
+        from left_random_solution_1 import solution as initial_solution
     else:
-        from right_random_solution_1 import sol as initial_solution
+        from right_random_solution_2 import solution as initial_solution
 if GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES:
     from cleverhans.attacks import CarliniWagnerL2, FastGradientMethod
 
@@ -93,42 +95,50 @@ def turn(addition, turn_name=TURN_NAME):
     # print(addition.shape)
     addition = Image.fromarray(addition)
     # addition.save("initial_addition.png")
-    # Cycle N random transformations
-    for transform in range(NUM_TRANSFORMATIONS):
-        print("[{:s}>{:s}]".format("-"*int(round(PROGRESS_LEN*transform/NUM_TRANSFORMATIONS)),
-                                   " "*int(PROGRESS_LEN - round(PROGRESS_LEN*transform/NUM_TRANSFORMATIONS))),end="\r")
-        if TRAIN_ON_REAL_IMAGES:
-            # Cycle all images real training images
-            random.shuffle(IMAGES_AND_STEERING)
-            for (original, sa) in IMAGES_AND_STEERING[:NUM_IMAGES]:
-                original = original.reshape(IMAGE_SHAPE)
-                # Combine the original image with the transformed addition
-                img = original + np.where(transformed_addition >= NEUTRAL_VALUE, 
-                                          transformed_addition - NEUTRAL_VALUE, 0)
-                img -= np.where(transformed_addition < NEUTRAL_VALUE,
-                                transformed_addition, 0)
-                # Identify the change in turning angle provided by the image
-                turn = float(MODEL.predict(np.array([img]), batch_size=1))
-                delta = turn - sa
-                all_delta.append(delta)
-                if SAVE_ALL_IMAGES:
-                    img = Image.fromarray(np.asarray(img.reshape(IMAGE_SHAPE), dtype=np.uint8))
-                    img_name = "{turn}_adv_imgs/({angle:+.2f})_{turn}_adversarial_{num:03d}-{orig:+.2f}_NEUTRAL.png".format(
-                        turn=turn_name, angle=turn, num=transform, orig=sa)
-                    img.save(img_name)
-        else:
+    if USE_RANDOM_TRANSFORMATIONS:
+        # Cycle N random transformations
+        for transform in range(NUM_TRANSFORMATIONS):
+            print("[{:s}>{:s}]".format("-"*int(round(PROGRESS_LEN*transform/NUM_TRANSFORMATIONS)),
+                                       " "*int(PROGRESS_LEN - round(PROGRESS_LEN*transform/NUM_TRANSFORMATIONS))),end="\r")
             # Train on the ability to turn
             transformed_addition = generate_transformed_addition(addition)
-            # Identify the change in turning angle provided by the image
-            turn = float(MODEL.predict(np.array([transformed_addition]), batch_size=1))
-            all_delta.append(turn)
-            if SAVE_ALL_IMAGES:
-                img = Image.fromarray(np.asarray(transformed_addition.reshape(IMAGE_SHAPE), dtype=np.uint8))
-                img_name = "{turn}_adv_imgs/({angle:+.2f})_{turn}_adversarial_{num:03d}_NEUTRAL.png".format(
-                    turn=turn_name, angle=turn, num=transform)
-                img.save(img_name)
-
-    print()
+            if TRAIN_ON_REAL_IMAGES:
+                # Cycle all images real training images
+                random.shuffle(IMAGES_AND_STEERING)
+                for (original, sa) in IMAGES_AND_STEERING[:NUM_IMAGES]:
+                    original = original.reshape(IMAGE_SHAPE)
+                    # Combine the original image with the transformed addition
+                    img = original + np.where(transformed_addition >= NEUTRAL_VALUE, 
+                                              transformed_addition - NEUTRAL_VALUE, 0)
+                    img -= np.where(transformed_addition < NEUTRAL_VALUE,
+                                    transformed_addition, 0)
+                    # Identify the change in turning angle provided by the image
+                    turn = float(MODEL.predict(np.array([img]), batch_size=1))
+                    delta = turn - sa
+                    all_delta.append(delta)
+                    if SAVE_ALL_IMAGES:
+                        img = Image.fromarray(np.asarray(img.reshape(IMAGE_SHAPE), dtype=np.uint8))
+                        img_name = "{turn}_adv_imgs/({angle:+.2f})_{turn}_adversarial_{num:03d}-({orig:+.2f}).png".format(
+                            turn=turn_name, angle=turn, num=transform, orig=sa)
+                        img.save(img_name)
+                        print("Saved '%s'"%img_name)
+            else:
+                # Identify the change in turning angle provided by the image
+                turn = float(MODEL.predict(np.array([transformed_addition]), batch_size=1))
+                all_delta.append(turn)
+                if SAVE_ALL_IMAGES:
+                    img = Image.fromarray(np.asarray(transformed_addition.reshape(IMAGE_SHAPE), dtype=np.uint8))
+                    img_name = "{turn}_adv_imgs/({angle:+.2f})_{turn}_adversarial_{num:03d}_NEUTRAL.png".format(
+                        turn=turn_name, angle=turn, num=transform)
+                    img.save(img_name)
+                    print("Saved '%s'"%img_name)
+        print()
+    else:
+        # Do not use random transformations, just optimize over a
+        # single image that takes up the entire view field of the car.
+        addition = addition.resize(IMAGE_SHAPE[:-1])
+        adv_img = np.array(addition).reshape((1,)+IMAGE_SHAPE)
+        all_delta = [float(MODEL.predict(adv_img))]
 
     if SAVE_ALL_IMAGES: 
         print("Done saving first round of images.")
@@ -141,8 +151,11 @@ def turn(addition, turn_name=TURN_NAME):
         p.add_histogram("Turn Angles", all_delta)
         p.plot(show=False, file_name="{}_adversarial_turn_angles.html".format(turn_name),show_legend=False)
 
+    # Flip the sign if we are optimizing for right turns
+    avg_delta = sum(all_delta) / len(all_delta)
+    if TURN_NAME == "right": avg_delta = -avg_delta
     # Return the average delta achieved by all transformations on all images
-    return sum(all_delta) / len(all_delta)
+    return avg_delta
 
 if NEUTRAL_IMAGE_TEST:
     fake_img = np.random.randint(0,255,size=ADVERSARIAL_IMAGE_SIZE, dtype=np.uint8).flatten()
@@ -154,16 +167,17 @@ if NEUTRAL_IMAGE_TEST:
 #      Adversarial Image Analysis     
 # ====================================
 if ANALYZE_EXISTING_IMAGE:
-    with open("{}_random_solution_1.pkl".format(TURN_NAME), "rb") as f:
-        output = pickle.load(f)
+    # with open("{}_random_solution_{}.pkl".format(TURN_NAME, SOLUTION_NUMBER), "rb") as f:
+    #     output = pickle.load(f)
+    output = np.array(initial_solution)
 
     p = Plot()
     p.add_histogram("Adversarial Image", output)
-    p.plot(file_name="{}_random_solution_1.html".format(TURN_NAME), show=False)
+    p.plot(file_name="{}_random_solution_{}.html".format(TURN_NAME, SOLUTION_NUMBER), show=False)
 
     print("Turn prouduced:", turn(output))
     img = Image.fromarray(np.asarray(output.reshape(ADVERSARIAL_IMAGE_SIZE), dtype=np.uint8))
-    img.save("{}_random_solution_1.png".format(TURN_NAME))
+    img.save("{}_random_solution_{}.png".format(TURN_NAME, SOLUTION_NUMBER))
     exit()
 
 # ======================================
@@ -173,12 +187,13 @@ if GENERATE_OPTIMIZED_ADVERSARIAL_IMAGES:
     sample_img = np.ones(ADVERSARIAL_IMAGE_SIZE, dtype=np.uint8).flatten()*NEUTRAL_VALUE
     print("Starting optimization.")
     bounds = [(0,255)]*np.prod(ADVERSARIAL_IMAGE_SIZE)
+    checkpoint_file = "{}_random_solution_{}.py".format(TURN_NAME, SOLUTION_NUMBER)
     output = minimize(turn, initial_solution, bounds=bounds,
                       max_time=MAX_COMPUTE_TIME_SEC,
-                      method=AdaptiveNormal, display=True)
-
+                      method=AdaptiveNormal, display=True,
+                      checkpoint_file=checkpoint_file)
     print(output)
-    with open("{}_random_solution_1.pkl".format(TURN_NAME), "wb") as f:
+    with open("{}_random_solution_2.pkl".format(TURN_NAME), "wb") as f:
         pickle.dump(output, f)
 
 
@@ -273,36 +288,11 @@ if GENERATE_CLEVERHANS_ADVERSARIAL_IMAGES:
     # Initialize the Fast Gradient Sign Method (FGSM) attack object and graph
     wrap = KerasModelWrapper(MODEL)
 
-    # # ======================
-    # # ======================
-    # #      TESTING CODE     
-    # from cleverhans import utils_tf
-    # img,sa = IMAGES_AND_STEERING[0]
-    # print("IMAGE SHAPE", img.shape, flush=True)
-    # print(model_with_softmax.predict(img))
-    # print("-"*50)
-    # preds = np.array([model_with_softmax.predict(img) for (img,sa) in IMAGES_AND_STEERING])
-
-    # # Create TF session and set as Keras backend session
-
-    # # Using model predictions as ground truth to avoid label leaking
-    # preds_max = tf.reduce_max(preds, 1, keep_dims=True)
-    # y = tf.to_float(tf.equal(preds, preds_max))
-    # y = tf.stop_gradient(y)
-    # y = y / tf.reduce_sum(y, 1, keep_dims=True)
-
-    # # Compute loss
-    # loss = utils_tf.model_loss(y, preds, mean=False)
-    # if targeted:
-    #     loss = -loss
-
-    # # Define gradient of loss wrt input
-    # grad, = tf.gradients(loss, x)
-    # print(grad)
-
-    # exit()
-    # # ======================
-    # # ======================
+    # ===============================================================
+    # WARNING: FAILURE POINT. Beyond this, the code fails. Neither of
+    # MODEL nor model_with_softmax have computable gradients by
+    # TensorFlow, which causes the Cleverhans code to fail.
+    # ===============================================================
 
     fgsm = FastGradientMethod(wrap, sess=sess)
     fgsm_params = {'eps': 0.3,
